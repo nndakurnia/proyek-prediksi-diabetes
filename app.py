@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import joblib
 import numpy as np
@@ -9,9 +9,10 @@ import uvicorn
 model = joblib.load('diabetes_model.pkl')
 scaler = joblib.load('scaler.pkl')
 
+# Inisialisasi aplikasi FastAPI
 app = FastAPI()
 
-# Mendefinisikan model data input menggunakan Pydantic
+# Definisikan model input menggunakan Pydantic
 class DiabetesInput(BaseModel):
     pregnancies: int
     glucose: float
@@ -26,28 +27,35 @@ class DiabetesInput(BaseModel):
 def index():
     return "Hello world from ML endpoint!"
 
+# Endpoint untuk prediksi
 @app.post("/predict")
-def predict_diabetes(input_data: DiabetesInput):
-    # Mengonversi input data ke dalam bentuk array
-    data = np.array([[input_data.pregnancies, input_data.glucose, input_data.blood_pressure,
-                      input_data.skin_thickness, input_data.insulin, input_data.bmi,
-                      input_data.diabetes_pedigree_function, input_data.age]])
+async def predict(data: DiabetesInput):
+    try:
+        # Konversi input data ke numpy array
+        input_array = np.array([[data.pregnancies, data.glucose, data.blood_pressure,
+                                 data.skin_thickness, data.insulin, data.bmi,
+                                 data.diabetes_pedigree_function, data.age]])
 
-    # Standarisasi data
-    data = scaler.transform(data)
+        # Standarisasi data
+        input_array = scaler.transform(input_array)
 
-    # Membuat prediksi
-    prediction = model.predict(data)
-    probability = model.predict_proba(data)
+        # Buat prediksi
+        prediction = model.predict(input_array)
+        probability = model.predict_proba(input_array)
 
-    # Mengembalikan hasil prediksi
-    return {
-        "prediction": int(prediction[0]),
-        "probability": probability[0].tolist()
-    }
+        predicted_class = int(prediction[0])
+        predicted_probability = (probability[0][predicted_class] * 100)
+
+        # Mengembalikan hasil prediksi
+        if (predicted_class == 0):
+            return {"class" : "Negative", "probability": f"{predicted_probability:.2f}%"}
+        elif (predicted_class == 1):
+            return {"class" : "Positive", "probability": f"{predicted_probability:.2f}%"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8080))
     host = os.getenv("HOST", "0.0.0.0")
-    print(f"Listening to http://0.0.0.0:{port}")
+    print(f"Listening to http://{host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="debug")
